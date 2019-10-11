@@ -7,6 +7,8 @@ namespace MediaBrowser.Controller.Authentication
     /// </summary>
     public class AuthenticationException : Exception
     {
+        public AuthentificatenStatus Status { get; private set; } = AuthentificatenStatus.FAILED;
+
         /// <inheritdoc />
         public AuthenticationException() : base()
         {
@@ -17,6 +19,12 @@ namespace MediaBrowser.Controller.Authentication
         public AuthenticationException(string message) : base(message)
         {
 
+        }
+
+        /// <inheritdoc />
+        public AuthenticationException(AuthentificatenStatus status, string message) : base(message)
+        {
+            Status = status;
         }
 
         /// <inheritdoc />

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Jellyfin.Server": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "JELLYFIN_WEB_DIR": "Z:\\Nextcloud\\Code\\jellyfin-web.git\\dist"
+      }
+    }
+  }
+}

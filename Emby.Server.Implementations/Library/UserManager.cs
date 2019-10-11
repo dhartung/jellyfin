@@ -263,7 +263,7 @@ namespace Emby.Server.Implementations.Library
             return builder.ToString();
         }
 
-        public async Task<User> AuthenticateUser(string username, string password, string hashedPassword, string remoteEndPoint, bool isUserSession)
+        public async Task<User> AuthenticateUser(string username, string password, string token, string remoteEndPoint, bool isUserSession)
         {
             if (string.IsNullOrWhiteSpace(username))
             {
@@ -272,24 +272,15 @@ namespace Emby.Server.Implementations.Library
 
             var user = Users.FirstOrDefault(i => string.Equals(username, i.Name, StringComparison.OrdinalIgnoreCase));
 
-            var success = false;
-            IAuthenticationProvider authenticationProvider = null;
+            var authResult = await AuthenticateLocalUser(username, password, token, user, remoteEndPoint).ConfigureAwait(false);
+            var authenticationProvider = authResult.authenticationProvider;
+            var status = authResult.status;
 
-            if (user != null)
+            if (user == null)
             {
-                var authResult = await AuthenticateLocalUser(username, password, hashedPassword, user, remoteEndPoint).ConfigureAwait(false);
-                authenticationProvider = authResult.authenticationProvider;
-                success = authResult.success;
-            }
-            else
-            {
-                // user is null
-                var authResult = await AuthenticateLocalUser(username, password, hashedPassword, null, remoteEndPoint).ConfigureAwait(false);
-                authenticationProvider = authResult.authenticationProvider;
                 string updatedUsername = authResult.username;
-                success = authResult.success;
 
-                if (success
+                if (status == AuthentificatenStatus.SUCCESS
                     && authenticationProvider != null
                     && !(authenticationProvider is DefaultAuthenticationProvider))
                 {
@@ -308,7 +299,7 @@ namespace Emby.Server.Implementations.Library
                 }
             }
 
-            if (success && user != null && authenticationProvider != null)
+            if (status == AuthentificatenStatus.SUCCESS && user != null && authenticationProvider != null)
             {
                 var providerId = GetAuthenticationProviderId(authenticationProvider);
 
@@ -321,12 +312,13 @@ namespace Emby.Server.Implementations.Library
 
             if (user == null)
             {
-                throw new AuthenticationException("Invalid username or password entered.");
+                throw new AuthenticationException(AuthentificatenStatus.WRONG_CREDENTIALS, "Invalid username or password entered.");
             }
 
             if (user.Policy.IsDisabled)
             {
                 throw new AuthenticationException(
+                    AuthentificatenStatus.DISABLED,
                     string.Format(
                         CultureInfo.InvariantCulture,
                         "The {0} account is currently disabled. Please consult with your administrator.",
@@ -335,7 +327,7 @@ namespace Emby.Server.Implementations.Library
 
             if (!user.Policy.EnableRemoteAccess && !_networkManager.IsInLocalNetwork(remoteEndPoint))
             {
-                throw new AuthenticationException("Forbidden.");
+                throw new AuthenticationException(AuthentificatenStatus.LOCAL_NETWORK_ONLY, "Forbidden.");
             }
 
             if (!user.IsParentalScheduleAllowed())
@@ -344,7 +336,7 @@ namespace Emby.Server.Implementations.Library
             }
 
             // Update LastActivityDate and LastLoginDate, then save
-            if (success)
+            if (status == AuthentificatenStatus.SUCCESS)
             {
                 if (isUserSession)
                 {
@@ -359,9 +351,9 @@ namespace Emby.Server.Implementations.Library
                 IncrementInvalidLoginAttemptCount(user);
             }
 
-            _logger.LogInformation("Authentication request for {0} {1}.", user.Name, success ? "has succeeded" : "has been denied");
+            _logger.LogInformation("Authentication request for {0} {1}.", user.Name, status == AuthentificatenStatus.SUCCESS ? "has succeeded" : "has been denied");
 
-            return success ? user : null;
+            return status == AuthentificatenStatus.SUCCESS ? user : null;
         }
 
         private static string GetAuthenticationProviderId(IAuthenticationProvider provider)
@@ -424,7 +416,7 @@ namespace Emby.Server.Implementations.Library
             return providers;
         }
 
-        private async Task<(string username, bool success)> AuthenticateWithProvider(IAuthenticationProvider provider, string username, string password, User resolvedUser)
+        private async Task<(string username, AuthentificatenStatus status)> AuthenticateWithProvider(IAuthenticationProvider provider, string username, string password, User resolvedUser)
         {
             try
             {
@@ -439,33 +431,33 @@ namespace Emby.Server.Implementations.Library
                     username = authenticationResult.Username;
                 }
 
-                return (username, true);
+                return (username, AuthentificatenStatus.SUCCESS);
             }
             catch (AuthenticationException ex)
             {
                 _logger.LogError(ex, "Error authenticating with provider {Provider}", provider.Name);
 
-                return (username, false);
+                return (username, ex.Status);
             }
         }
 
-        private async Task<(IAuthenticationProvider authenticationProvider, string username, bool success)> AuthenticateLocalUser(
+        private async Task<(IAuthenticationProvider authenticationProvider, string username, AuthentificatenStatus status)> AuthenticateLocalUser(
             string username,
             string password,
-            string hashedPassword,
+            string token,
             User user,
             string remoteEndPoint)
         {
-            bool success = false;
+            var status = AuthentificatenStatus.FAILED;
             IAuthenticationProvider authenticationProvider = null;
 
             foreach (var provider in GetAuthenticationProviders(user))
             {
                 var providerAuthResult = await AuthenticateWithProvider(provider, username, password, user).ConfigureAwait(false);
                 var updatedUsername = providerAuthResult.username;
-                success = providerAuthResult.success;
+                status = providerAuthResult.status;
 
-                if (success)
+                if (status == AuthentificatenStatus.SUCCESS)
                 {
                     authenticationProvider = provider;
                     username = updatedUsername;
@@ -473,17 +465,17 @@ namespace Emby.Server.Implementations.Library
                 }
             }
 
-            if (!success
+            if (!(status == AuthentificatenStatus.SUCCESS)
                 && _networkManager.IsInLocalNetwork(remoteEndPoint)
                 && user.Configuration.EnableLocalPassword)
             {
-                success = string.Equals(
+                status = string.Equals(
                     GetLocalPasswordHash(user),
                     _defaultAuthenticationProvider.GetHashedString(user, password),
-                    StringComparison.OrdinalIgnoreCase);
+                    StringComparison.OrdinalIgnoreCase) ? AuthentificatenStatus.SUCCESS : AuthentificatenStatus.FAILED;
             }
 
-            return (authenticationProvider, username, success);
+            return (authenticationProvider, username, status);
         }
 
         private string GetLocalPasswordHash(User user)

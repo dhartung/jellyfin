@@ -89,8 +89,15 @@ namespace MediaBrowser.Api
         /// Gets or sets the password.
         /// </summary>
         /// <value>The password.</value>
-        [ApiMember(Name = "Password", IsRequired = true, DataType = "string", ParameterType = "body", Verb = "POST")]
+        [ApiMember(Name = "Password", IsRequired = false, DataType = "string", ParameterType = "body", Verb = "POST")]
         public string Password { get; set; }
+
+        /// <summary>
+        /// Gets or sets the token.
+        /// </summary>
+        /// <value>The token.</value>
+        [ApiMember(Name = "Token", IsRequired = false, DataType = "string", ParameterType = "body", Verb = "POST")]
+        public string Token { get; set; }
     }
 
     /// <summary>
@@ -110,11 +117,18 @@ namespace MediaBrowser.Api
         /// Gets or sets the password.
         /// </summary>
         /// <value>The password.</value>
-        [ApiMember(Name = "Password", IsRequired = true, DataType = "string", ParameterType = "body", Verb = "POST")]
+        [ApiMember(Name = "Password", IsRequired = false, DataType = "string", ParameterType = "body", Verb = "POST")]
         public string Password { get; set; }
 
         [ApiMember(Name = "Pw", IsRequired = true, DataType = "string", ParameterType = "body", Verb = "POST")]
         public string Pw { get; set; }
+
+        /// <summary>
+        /// Gets or sets the token.
+        /// </summary>
+        /// <value>The token.</value>
+        [ApiMember(Name = "Token", IsRequired = false, DataType = "string", ParameterType = "body", Verb = "POST")]
+        public string Token { get; set; }
     }
 
     /// <summary>
@@ -139,6 +153,8 @@ namespace MediaBrowser.Api
         public string CurrentPw { get; set; }
 
         public string NewPw { get; set; }
+
+        public string Token { get; set; }
 
         /// <summary>
         /// Gets or sets a value indicating whether [reset password].
@@ -389,16 +405,12 @@ namespace MediaBrowser.Api
                 throw new ResourceNotFoundException("User not found");
             }
 
-            if (!string.IsNullOrEmpty(request.Password) && string.IsNullOrEmpty(request.Pw))
-            {
-                throw new MethodNotAllowedException("Hashed-only passwords are not valid for this API.");
-            }
-
             return Post(new AuthenticateUserByName
             {
                 Username = user.Name,
                 Password = null, // This should always be null
-                Pw = request.Pw
+                Pw = request.Pw,
+                Token = request.Token
             });
         }
 
@@ -414,10 +426,10 @@ namespace MediaBrowser.Api
                     AppVersion = auth.Version,
                     DeviceId = auth.DeviceId,
                     DeviceName = auth.Device,
-                    Password = request.Pw,
-                    PasswordSha1 = request.Password,
+                    Password = string.IsNullOrEmpty(request.Pw) ? request.Password : request.Pw,
                     RemoteEndPoint = Request.RemoteIp,
-                    Username = request.Username
+                    Username = request.Username,
+                    Token = request.Token
                 }).ConfigureAwait(false);
 
                 return ToOptimizedResult(result);
@@ -455,7 +467,7 @@ namespace MediaBrowser.Api
             }
             else
             {
-                var success = await _userManager.AuthenticateUser(user.Name, request.CurrentPw, request.CurrentPassword, Request.RemoteIp, false).ConfigureAwait(false);
+                var success = await _userManager.AuthenticateUser(user.Name, request.CurrentPw, request.Token, Request.RemoteIp, false).ConfigureAwait(false);
 
                 if (success == null)
                 {
